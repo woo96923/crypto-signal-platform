@@ -1,0 +1,2 @@
+파이썬 가상화 환경 설정을 위해 꼭 실행하기
+source venv/bin/activate
