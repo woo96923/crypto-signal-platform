@@ -24,8 +24,9 @@ def get_s3_path(data_type: str, year: int, month: str, day: str, hour: Optional[
     
     if data_type == "daily_market_data":
         return f"{base_path}/year={year}/month={month}/day={day}/data.parquet"
-    elif data_type == "market_5m" and hour and minute:
-        return f"{base_path}/year={year}/month={month}/day={day}/hour={hour}/minute={minute}/data.parquet"
+    elif data_type == "market_5m" and hour:
+        # 5분봉은 시간 단위로만 파티션 (분 단위 제거)
+        return f"{base_path}/year={year}/month={month}/day={day}/hour={hour}/data.parquet"
     elif data_type == "fear_and_greed_index":
         return f"{base_path}/year={year}/month={month}/day={day}/data.parquet"
     else:

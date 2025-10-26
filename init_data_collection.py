@@ -120,7 +120,7 @@ def save_5min_data_to_s3(df: pd.DataFrame):
         single_row_df = pd.DataFrame([row])
         
         # S3 경로 구성
-        s3_path = get_s3_path("market_5m", year, month, day, hour, minute)
+        s3_path = get_s3_path("market_5m", year, month, day, hour)
         
         try:
             single_row_df.to_parquet(s3_path, engine='pyarrow', index=False)
