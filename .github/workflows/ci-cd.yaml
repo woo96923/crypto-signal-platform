@@ -1,32 +1,42 @@
 name: CI/CD Pipeline for Crypto Platform
 
+# 1. 트리거: main 브랜치에 코드가 푸시될 때만 실행
 on:
   push:
     branches:
-      - main  # main 브랜치에 푸시될 때마다 실행
+      - main
 
+# 2. 환경 변수: 모든 작업(jobs)에서 공통으로 사용할 값들
 env:
-  # Terraform Output에서 가져온 값들을 GitHub Secrets에 등록하세요
   AWS_REGION: "ap-northeast-2"
-  ECR_REPOSITORY_URL: ${{ secrets.ECR_REPOSITORY_URL }} # 예: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/crypto-platform/app
   EKS_CLUSTER_NAME: "crypto-platform-eks" # Jinnie님의 EKS 클러스터 이름
-  IAM_ROLE_ARN: ${{ secrets.IAM_ROLE_ARN }} # 2단계에서 만든 GitHub Actions 역할 ARN
+  # (비밀 금고에서 값을 가져옴)
+  ECR_REPOSITORY_URL: ${{ secrets.ECR_REPOSITORY_URL }}
+  IAM_ROLE_ARN: ${{ secrets.IAM_ROLE_ARN }}
 
 jobs:
+  # ===============================================
+  # CI (Continuous Integration) 작업
+  # 역할: 코드 테스트, Docker 이미지 빌드, ECR에 푸시
+  # ===============================================
   build-and-push:
     name: Build and Push to ECR
     runs-on: ubuntu-latest
 
-    # 1. OIDC를 사용하기 위한 권한 설정
+    # OIDC (비밀번호 없는 AWS 로그인)를 위한 권한 설정
     permissions:
       id-token: write
       contents: read
+
+    outputs:
+      # 다음 작업(deploy)에서 사용할 수 있도록 이미지 태그를 "출력" 변수로 설정
+      image_tag: ${{ steps.build-image.outputs.image_tag }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.IAM_ROLE_ARN }}
@@ -38,10 +48,67 @@ jobs:
       - name: Build, tag, and push image to ECR
         id: build-image
         run: |
-          # Git commit SHA를 이미지 태그로 사용하여 버전을 관리
-          IMAGE_TAG=${{ github.sha }}
+          # 3. 고유한 태그 생성 (Git 커밋 해시의 앞 7자리 사용)
+          IMAGE_TAG=$(git rev-parse --short HEAD)
+          
+          # 4. 이미지 빌드 (고유 태그와 :latest 태그, 총 2개로 빌드)
           docker build -t $ECR_REPOSITORY_URL:$IMAGE_TAG -t $ECR_REPOSITORY_URL:latest .
+          
+          # 5. ECR에 2개 태그 모두 푸시
           docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
           docker push $ECR_REPOSITORY_URL:latest
-          # CD 단계에서 이미지 태그를 사용할 수 있도록 출력 변수로 설정
+          
+          # 6. 다음 단계를 위해 고유 태그를 출력 변수로 내보내기
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ===============================================
+  # CD (Continuous Delivery) 작업
+  # 역할: EKS 클러스터에 접속하여 새 이미지로 교체(배포)
+  # ===============================================
+  deploy-to-eks:
+    name: Deploy to EKS
+    # 7. 'build-and-push' 작업이 성공해야만 이 작업이 실행됨
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    # OIDC (비밀번호 없는 AWS 로그인)를 위한 권한 설정
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 8. EKS 클러스터에 접속하기 (필수)
+      - name: Set up kubectl
+        uses: aws-actions/amazon-eks-cluster@v1
+        with:
+          cluster-name: ${{ env.EKS_CLUSTER_NAME }}
+          # (EKS 모듈로 만들었다면 이 옵션이 필요할 수 있습니다)
+          # cluster-role-arn: arn:aws:iam::ACCOUNT-ID:role/EKSClusterRole...
+
+      # 9. [핵심] K8s 배포 파일의 이미지 태그 교체하기
+      - name: Update image tag in CronJob manifest
+        run: |
+          # CI 작업에서 "출력"한 고유한 이미지 태그를 가져옴
+          NEW_TAG=${{ needs.build-and-push.outputs.image_tag }}
+          
+          # cronjob.yaml 파일의 'image:' 부분을 새 태그로 덮어쓰기
+          # (이 작업은 VM에 받아둔 파일을 수정할 뿐, GitHub 원본을 바꾸진 않음)
+          sed -i "s|image: .*|image: $ECR_REPOSITORY_URL:$NEW_TAG|g" cronjob.yaml
+          
+          echo "Updated cronjob.yaml with image tag: $NEW_TAG"
+          cat cronjob.yaml # (로그 확인용)
+
+      # 10. [최종] EKS 클러스터에 배포(적용)하기
+      - name: Deploy CronJob to EKS
+        run: |
+          # 9단계에서 수정한 cronjob.yaml 파일을 EKS에 적용
+          kubectl apply -f cronjob.yaml

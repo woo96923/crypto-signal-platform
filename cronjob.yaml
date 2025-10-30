@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crypto-data-collector
+spec:
+  # 1. 실행 주기: "매일 00:05 (UTC)" = "오전 9:05 (KST)"
+  schedule: "5 0 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: data-collector-container
+            # 2. 실행할 도커 이미지
+            # (CI/CD 파이프라인이 이 'image:' 줄을 최신 태그로 덮어씁니다)
+            image: ${{ secrets.ECR_REPOSITORY_URL }}:latest
+            env:
+            - name: AWS_REGION
+              value: "ap-northeast-2"
+            # 3. (추후 IRSA 설정을 위해 ServiceAccount 이름을 지정합니다)
+            # serviceAccountName: data-collector-sa
+          restartPolicy: OnFailure
