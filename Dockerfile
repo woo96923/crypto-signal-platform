@@ -4,7 +4,7 @@ FROM python:3.10-slim
 # 2. 작업 디렉토리 설정
 WORKDIR /app
 
-# 3. AWS CLI 설치 (S3/Athena 접근에 필요할 수 있음)
+# 3. AWS CLI 설치
 RUN apt-get update && apt-get install -y \
     curl \
     unzip \
@@ -13,15 +13,12 @@ RUN apt-get update && apt-get install -y \
     && ./aws/install \
     && rm -rf awscliv2.zip aws
 
-# 4. 의존성 설치 (효율적인 캐싱을 위해 코드 복사 전에 실행)
+# 4. 의존성 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. 프로젝트 코드 복사
-# (만약 스크립트가 여러 폴더에 있다면 'COPY . .' 사용)
-COPY ./run_pipeline.py . 
-# COPY ./utils/ /app/utils/
+# 5. 프로젝트의 모든 Python 코드 및 설정 복사 (만능 툴박스)
+COPY ./*.py ./
+COPY ./config.py ./
 
-# 6. 컨테이너가 실행될 때 수행할 기본 명령어
-# (run_pipeline.py 스크립트를 실행하도록 설정)
-CMD ["python", "run_pipeline.py"]
+# 6. CMD 제거: 실행 명령은 Kubernetes 매니페스트에서 지정

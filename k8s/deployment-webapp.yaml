@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crypto-webapp
+  labels:
+    app: crypto-webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crypto-webapp
+  template:
+    metadata:
+      labels:
+        app: crypto-webapp
+    spec:
+      containers:
+        - name: webapp
+          image: crypto-signal-platform:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8501
+          command:
+            - sh
+            - -c
+            - |
+              streamlit run web_app.py --server.port=8501 --server.address=0.0.0.0
+
